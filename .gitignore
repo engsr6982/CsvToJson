@@ -40,3 +40,6 @@ out
 .idea
 
 SDK/*
+SDK
+
+.vs/*
