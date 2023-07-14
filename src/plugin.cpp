@@ -35,7 +35,7 @@ bool ReleaseConfig() {
 	json Config;
 	Config["Cache"] = true;
 	std::ofstream file(config_path);
-	file << Config << std::endl;
+	file << Config.dump(4) << std::endl;
 	return true;
 }
 
@@ -128,7 +128,10 @@ void PluginInit()
 	// 初始化日志等级
 	std::filesystem::exists("./plugins/PPOUI/debug") ? logger.consoleLevel = 5 : NULL;
 	// 初始化配置文件
-	std::filesystem::exists(config_path) ? readConfig() : ReleaseConfig();
+	if (!std::filesystem::exists(config_path)) {
+		ReleaseConfig();
+		logger.warn("检测到配置文件不存在，正在生成配置文件...");
+	}
 	// 服务器启动完成事件
 	Event::ServerStartedEvent::subscribe([](const Event::ServerStartedEvent)
 		{
@@ -136,6 +139,8 @@ void PluginInit()
 			if (TARGET_BDS_PROTOCOL_VERSION == current_protocol) {
 				exportToJavaScriptAPI() ? logger.info("CsvToJson API已导出") : logger.error("导出API失败");
 			}
+			// 读取配置文件
+			readConfig();
 			logger.debug("DeBug模式已启用");
 			return true; });
 }
