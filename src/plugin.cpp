@@ -1,8 +1,10 @@
-// 系统头文件 避免玄学，优先导入
+// 系统头文件
 #include <iostream>
 #include <string>
 #include <vector>
 #include <fstream>
+
+// 第三方库
 #include "rapidcsv.h"
 
 // LL头文件
@@ -12,29 +14,39 @@
 #include <llapi/ServerAPI.h>
 #include <llapi/RemoteCallAPI.h>
 #include <Nlohmann/json.hpp>
+#include <llapi/KVDBAPI.h>
+
+// 作者插件目录
+#define _AUTHOR_PATH_ "./plugins/" PLUGIN_AUTHOR "/"
+// 插件目录
+#define _PLUGIN_PATH_ _AUTHOR_PATH_ "Web_Log/"
+// 配置文件路径
+#define _CONFIG_PATH_ _PLUGIN_PATH_ "CSV_PRO.json"
+
+#define _EXPORT_NAMESPACE_ "_CSV_JSON_"
 
 extern Logger logger;
 using json = nlohmann::json;
 
 // 是否启用缓存
 bool isCache;
-// 配置文件路径
-std::string config_path = "./plugins/PPOUI/Web_Log/CSV_PRO.json";
 
-// 缓存转换后的二维数组 key: 文件名 value: 二维数组
-std::unordered_map<std::string, std::vector<std::vector<std::string>>> fileCache;
-// 缓存文件的SHA1
-std::unordered_map<std::string, std::string> fileHASH;
-
+// KVDB数据库
+std::unique_ptr<KVDB> db;
+void initdb() {
+	db = KVDB::create(_PLUGIN_PATH_"_Cache");
+	assert(db != nullptr && *db);
+}
 
 /**
  * @brief 释放配置文件
  * @return bool
  */
-bool ReleaseConfig() {
+bool ReleaseConfig()
+{
 	json Config;
 	Config["Cache"] = true;
-	std::ofstream file(config_path);
+	std::ofstream file(_CONFIG_PATH_);
 	file << Config.dump(4) << std::endl;
 	return true;
 }
@@ -46,23 +58,24 @@ bool ReleaseConfig() {
 bool readConfig()
 {
 	json Config;
-	std::ifstream i(config_path);
+	std::ifstream i(_CONFIG_PATH_);
 	i >> Config;
 	isCache = Config["Cache"];
+	std::cout << isCache << std::endl;
 	return true;
 }
 
 /**
  * @brief 获取文件HASH值
  * @return string hash
-*/
-std::string getFileHash(std::string filePath) {
+ */
+std::string getFileHash(std::string filePath)
+{
 	std::ifstream file(filePath);
 	std::string content((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
 	std::hash<std::string> hasher;
 	return std::to_string(hasher(content));
 }
-
 
 /**
  * @brief 转换数据
@@ -88,27 +101,28 @@ std::vector<std::vector<std::string>> csvTo2DArray(const std::string& csvFilePat
 	return data;
 }
 
-
 bool exportToJavaScriptAPI()
 {
-	std::string title = "_CSV_JSON_";
-	RemoteCall::exportAs(title, "_csvToJson_", [&](std::string name) -> std::vector<std::vector<std::string>>
+	RemoteCall::exportAs(_EXPORT_NAMESPACE_, "_csvToJson_", [&](std::string name) -> std::vector<std::vector<std::string>>
 		{
-			if (isCache) {
-				// 缓存已开启, 检查文件是否变动(SHA1)
-				std::string currentHash = getFileHash(name);
-				if (fileHASH[name] != currentHash) {
-					// 文件有变动，调用转换函数并更新缓存
-					fileHASH[name] = currentHash;
-					fileCache[name] = csvTo2DArray(name);
-					return fileCache[name];
+			std::string currentHash = getFileHash(name);
+			std::string value;
+			if (db->get(name, value) && isCache)
+			{
+				nlohmann::json cache = nlohmann::json::parse(value);
+				if (cache["hash"].get<std::string>() != currentHash)
+				{
+					nlohmann::json newCache;
+					newCache["hash"] = currentHash;
+					newCache["data"] = csvTo2DArray(name);
+					std::string value = newCache.dump();
+					db->set(name, value);
+					return newCache["data"].get<std::vector<std::vector<std::string>>>();
 				}
-				// 若未变动，直接返回缓存中的二维数组
-				return fileCache[name];
+				return cache["data"].get<std::vector<std::vector<std::string>>>();
 			}
 			else
 			{
-				// 缓存关闭，直接调用转换函数，并返回二维数组
 				return csvTo2DArray(name);
 			}
 		}
@@ -121,14 +135,12 @@ bool exportToJavaScriptAPI()
 	return true;
 }
 
-
-
 void PluginInit()
 {
-	// 初始化日志等级
-	std::filesystem::exists("./plugins/PPOUI/debug") ? logger.consoleLevel = 5 : NULL;
+	std::filesystem::exists(_AUTHOR_PATH_ "debug") ? logger.consoleLevel = 5 : NULL;
 	// 初始化配置文件
-	if (!std::filesystem::exists(config_path)) {
+	if (!std::filesystem::exists(_CONFIG_PATH_))
+	{
 		ReleaseConfig();
 		logger.warn("检测到配置文件不存在，正在生成配置文件...");
 	}
@@ -141,6 +153,7 @@ void PluginInit()
 			}
 			// 读取配置文件
 			readConfig();
-			logger.debug("DeBug模式已启用");
+			// 初始化数据库
+			initdb();
 			return true; });
 }
