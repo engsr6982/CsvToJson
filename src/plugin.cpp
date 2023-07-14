@@ -33,8 +33,9 @@ bool isCache;
 
 // KVDB数据库
 std::unique_ptr<KVDB> db;
-void initdb() {
-	db = KVDB::create(_PLUGIN_PATH_"_Cache");
+void initdb()
+{
+	db = KVDB::create(_PLUGIN_PATH_ "_Cache");
 	assert(db != nullptr && *db);
 }
 
@@ -61,7 +62,6 @@ bool readConfig()
 	std::ifstream i(_CONFIG_PATH_);
 	i >> Config;
 	isCache = Config["Cache"];
-	std::cout << isCache << std::endl;
 	return true;
 }
 
@@ -103,35 +103,39 @@ std::vector<std::vector<std::string>> csvTo2DArray(const std::string& csvFilePat
 
 bool exportToJavaScriptAPI()
 {
+	// 转换API
 	RemoteCall::exportAs(_EXPORT_NAMESPACE_, "_csvToJson_", [&](std::string name) -> std::vector<std::vector<std::string>>
 		{
-			std::string currentHash = getFileHash(name);
-			std::string value;
-			if (db->get(name, value) && isCache)
-			{
-				nlohmann::json cache = nlohmann::json::parse(value);
-				if (cache["hash"].get<std::string>() != currentHash)
+			// 缓存开启
+			logger.debug("缓存状态: {}", isCache);
+			if (isCache) {
+				// 计算HASH
+				std::string currentHash = getFileHash(name);
+				std::string value;
+				// 检查数据是否存在
+				auto status = db->get(name, value);
+				logger.debug("文件HASH: {}", currentHash);
+				logger.debug("检查缓存：{}", status);
+				if (status)
 				{
-					nlohmann::json newCache;
-					newCache["hash"] = currentHash;
-					newCache["data"] = csvTo2DArray(name);
-					std::string value = newCache.dump();
-					db->set(name, value);
-					return newCache["data"].get<std::vector<std::vector<std::string>>>();
+					json cache = json::parse(value);
+					if (cache["hash"].get<std::string>() != currentHash)
+					{
+						// hash不匹配
+						auto tmp = csvTo2DArray(name);
+						json newCache;
+						newCache["hash"] = currentHash;
+						newCache["data"] = tmp;
+						db->set(name, newCache.dump());
+						return tmp;
+					}
+					return cache["data"];/* .get<std::vector<std::vector<std::string>>>(); */
 				}
-				return cache["data"].get<std::vector<std::vector<std::string>>>();
 			}
-			else
-			{
-				return csvTo2DArray(name);
-			}
+			// 缓存关闭
+			return csvTo2DArray(name);
 		}
 	);
-	// 增加API
-	// 1. 获取所有SHA1缓存
-	// 2. 获取所有缓存二维数组
-	// 3. 清除缓存(二维数组 / SHA1)
-
 	return true;
 }
 
