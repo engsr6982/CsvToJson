@@ -107,7 +107,7 @@ bool exportToJavaScriptAPI()
 	RemoteCall::exportAs(_EXPORT_NAMESPACE_, "_csvToJson_", [&](std::string name) -> std::vector<std::vector<std::string>>
 		{
 			// 缓存开启
-			logger.debug("缓存状态: {}", isCache);
+			logger.debug("开启缓存: {}", isCache);
 			if (isCache) {
 				// 计算HASH
 				std::string currentHash = getFileHash(name);
@@ -118,18 +118,31 @@ bool exportToJavaScriptAPI()
 				logger.debug("检查缓存：{}", status);
 				if (status)
 				{
+					logger.debug("[{}]命中缓存", name);
 					json cache = json::parse(value);
 					if (cache["hash"].get<std::string>() != currentHash)
 					{
 						// hash不匹配
+						logger.debug("[{}]HASH不匹配", name);
 						auto tmp = csvTo2DArray(name);
-						json newCache;
-						newCache["hash"] = currentHash;
-						newCache["data"] = tmp;
-						db->set(name, newCache.dump());
+						json updateCache;
+						updateCache["hash"] = currentHash;
+						updateCache["data"] = tmp;
+						db->set(name, updateCache.dump());
 						return tmp;
 					}
+					// hash匹配，返回缓存
 					return cache["data"];/* .get<std::vector<std::vector<std::string>>>(); */
+				}
+				else
+				{
+					logger.debug("[{}]未命中缓存", name);
+					auto tmp = csvTo2DArray(name);
+					json newCache;
+					newCache["hash"] = currentHash;
+					newCache["data"] = tmp;
+					db->set(name, newCache.dump());
+					return tmp;
 				}
 			}
 			// 缓存关闭
